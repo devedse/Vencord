@@ -16,6 +16,21 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+/**
+ * SeparateStreamWindows Plugin
+ * 
+ * This plugin allows you to open each Discord stream in a separate window instead of
+ * having them all share the same popup window. This is useful when viewing multiple
+ * streams simultaneously.
+ * 
+ * Features:
+ * - Adds "Open in New Window" option to stream and user context menus
+ * - Each stream opens in its own unique popout window
+ * - Prevents duplicate windows for the same stream
+ * - Displays actual stream previews when available
+ * - Uses Discord's native styling and popout system
+ */
+
 import { NavContextMenuPatchCallback } from "@api/ContextMenu";
 import { ScreenshareIcon } from "@components/Icons";
 import { Devs } from "@utils/constants";
@@ -56,9 +71,17 @@ export interface StreamContextProps {
 // Store opened stream windows to avoid duplicates
 const openStreamWindows = new Set<string>();
 
+/**
+ * Creates a unique key for a stream based on its properties
+ */
 const createStreamKey = (stream: ApplicationStream | Stream) => {
     return `stream-${stream.guildId || 'dm'}-${stream.channelId}-${stream.ownerId}`;
 };
+
+/**
+ * Handles opening a stream in a new popout window
+ * @param stream The stream to open
+ */
 
 export const handleOpenStreamInNewWindow = async (stream: ApplicationStream | Stream) => {
     const streamKey = createStreamKey(stream);
@@ -70,64 +93,86 @@ export const handleOpenStreamInNewWindow = async (stream: ApplicationStream | St
     
     openStreamWindows.add(streamKey);
     
-    // Get the stream preview URL
-    const previewUrl = await ApplicationStreamPreviewStore.getPreviewURL(stream.guildId, stream.channelId, stream.ownerId);
-    
-    // Create a stream display component
-    const StreamWindow = () => {
-        React.useEffect(() => {
-            return () => {
-                openStreamWindows.delete(streamKey);
-            };
-        }, []);
+    try {
+        // Get the stream preview URL
+        const previewUrl = await ApplicationStreamPreviewStore.getPreviewURL(stream.guildId, stream.channelId, stream.ownerId);
         
-        return React.createElement("div", {
-            style: {
-                width: "100%",
-                height: "100%",
-                display: "flex",
-                flexDirection: "column",
-                backgroundColor: "#36393f",
-                color: "#dcddde"
-            }
-        }, 
-            React.createElement("div", {
+        // Create a stream display component
+        const StreamWindow = () => {
+            React.useEffect(() => {
+                return () => {
+                    openStreamWindows.delete(streamKey);
+                };
+            }, []);
+            
+            return React.createElement("div", {
                 style: {
-                    padding: "10px",
-                    borderBottom: "1px solid #4f545c",
-                    fontSize: "16px",
-                    fontWeight: "bold"
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    backgroundColor: "#36393f",
+                    color: "#dcddde",
+                    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
                 }
-            }, `Stream from User ${stream.ownerId}`),
-            previewUrl 
-                ? React.createElement("img", {
-                    src: previewUrl,
+            }, 
+                React.createElement("div", {
                     style: {
-                        width: "100%",
-                        height: "calc(100% - 50px)",
-                        objectFit: "contain"
-                    },
-                    alt: "Stream preview"
-                })
-                : React.createElement("div", {
+                        padding: "10px",
+                        borderBottom: "1px solid #4f545c",
+                        fontSize: "16px",
+                        fontWeight: "bold",
+                        textAlign: "center"
+                    }
+                }, `Stream from User ${stream.ownerId}`),
+                previewUrl 
+                    ? React.createElement("img", {
+                        src: previewUrl,
+                        style: {
+                            width: "100%",
+                            height: "calc(100% - 50px)",
+                            objectFit: "contain",
+                            backgroundColor: "#2f3136"
+                        },
+                        alt: "Stream preview",
+                        onError: (e) => {
+                            e.currentTarget.style.display = "none";
+                            const errorDiv = e.currentTarget.parentElement?.querySelector(".error-message");
+                            if (errorDiv) errorDiv.style.display = "flex";
+                        }
+                    })
+                    : null,
+                React.createElement("div", {
+                    className: "error-message",
                     style: {
-                        display: "flex",
+                        display: previewUrl ? "none" : "flex",
                         alignItems: "center",
                         justifyContent: "center",
                         height: "calc(100% - 50px)",
-                        fontSize: "18px"
+                        fontSize: "18px",
+                        color: "#b9bbbe"
                     }
-                }, "Loading stream...")
-        );
-    };
-    
-    PopoutActions.open(streamKey, () => React.createElement(StreamWindow), {
-        width: 1280,
-        height: 720,
-        resizable: true
-    });
+                }, previewUrl === null ? "Stream preview not available" : "Loading stream...")
+            );
+        };
+        
+        PopoutActions.open(streamKey, () => React.createElement(StreamWindow), {
+            width: 1280,
+            height: 720,
+            resizable: true,
+            alwaysOnTop: false
+        });
+    } catch (error) {
+        console.error("Failed to open stream in new window:", error);
+        openStreamWindows.delete(streamKey);
+    }
 };
 
+/**
+ * Adds the "Open in New Window" context menu item to stream contexts
+ * @param children The context menu children array
+ * @param userId The user ID of the stream owner
+ */
 export const addStreamWindowContext: NavContextMenuPatchCallback = (children, { userId }: { userId: string | bigint; }) => {
     const stream = ApplicationStreamingStore.getAnyStreamForUser(userId);
     if (!stream) return;
